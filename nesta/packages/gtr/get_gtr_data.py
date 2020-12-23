@@ -8,6 +8,7 @@ project entities.
 """
 
 import requests
+import pickle
 import xml.etree.ElementTree as ET
 import re
 from collections import defaultdict
@@ -141,6 +142,27 @@ class TypeDict(dict):
         super().__setitem__(k, v)
 
 
+class DictOfLists(defaultdict):
+    """A dictionary whose values are lists of items. A value which hasn't been assigned
+    contains an empty list. An append_to_value method is provided in order to append
+    items to values"""
+    def __init__(self):
+        super().__init__(list)
+
+    def append_to_value(self, key, item):
+        self[key].append(item)
+
+
+class LoggingDictOfLists(DictOfLists):
+    """DictOfLists which captures the content of each value to a pickle file
+    whenever it is appended"""
+    def append_to_value(self, key, item):
+        super().append_to_value(key, item)
+        value = self[key]
+        with open(f'{key}-{len(value)}.pickle', 'wb') as fp:
+            pickle.dump(value[-1], fp)
+
+
 def deduplicate_participants(data):
     """The participant data is a duplicate of organisation,
     with only two specific interesting fields. Unfortunately
@@ -229,7 +251,7 @@ def unpack_list_data(row, data):
                     item.pop('percentage')
                 item['topic_type'] = key
                 table_name = 'topic'
-            data[table_name.replace("/", "_")].append(item)
+            data.append_to_value(table_name.replace("/", "_"), item)
 
 
 def extract_link_data(url):
@@ -445,7 +467,7 @@ if __name__ == "__main__":
     # The output data structure:
     # each key represents a unique flat entity (i.e. a flat 'table')
     # each list represents rows in that table.
-    data = defaultdict(list)
+    data = LoggingDictOfLists()
 
     # Iterate through all pages
     for page in range(1, total_pages+1):
@@ -460,16 +482,11 @@ if __name__ == "__main__":
             unpack_list_data(row, data)
             row.pop('identifiers')
             # Append the row
-            data[row.pop('entity')].append(row)
-            break
-        break
+            data.append_to_value(row.pop('entity'), row)
 
     # The 'participant' data is near duplicate
     # of 'organisation' data so merge them.
     if 'participant' in data:
         deduplicate_participants(data)
-
-    for k, v in data.items():
-        print(k)
-        print(v)
-        print()
+        with open('participant_deduplicated.pickle', 'wb') as fp:
+            pickle.dump(data['participant'], fp)
